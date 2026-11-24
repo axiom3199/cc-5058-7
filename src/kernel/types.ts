@@ -245,6 +245,12 @@ export interface SelectionInput {
   reservations: ReservationView;
   policy: Policy;
   failedCandidateIds?: string[];
+  /**
+   * Failure records written by an older spatial query backend. They are never
+   * applied as rejections; the selector invalidates them and reports them on
+   * the result so the feedback loop can re-measure under the current backend.
+   */
+  legacyFailedCandidateIds?: string[];
   /** Other characters' bodies; a cover spot must leave room for the squad too. */
   otherAgents?: { id: string; name: string; pos: Vec2; radius: number }[];
   now?: number;
@@ -267,6 +273,10 @@ export interface SelectionResult {
   rationale: string[];
   reservationVersion: number;
   hiddenHostileLeak: boolean;
+  /** Spatial query backend that produced this result (see sceneQuery.ts). */
+  queryBackend: string;
+  /** Legacy failure records invalidated on input because they predate queryBackend. */
+  invalidatedLegacyCandidateIds: string[];
 }
 
 export interface AgentClearance {

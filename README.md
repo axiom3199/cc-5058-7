@@ -11,7 +11,7 @@ A small, deterministic **cover-selection kernel** plus a graphical sandbox and a
 ```bash
 npm install
 npm run dev        # graphical sandbox  → http://localhost:5173
-npm test           # 29 kernel + replay tests
+npm test           # 45 kernel + replay tests
 npm run build      # type-checked production bundle
 ```
 
@@ -50,12 +50,46 @@ The pipeline lives in `src/kernel/`:
 
 ```
 geometry.ts     rectangles, ray/AABB entry tests, bearing maths
+sceneQuery.ts   unified scene query interface (spatial-query-v2)
 exposure.ts     candidate generation + height-aware occlusion sampling
 navigation.ts   clearance grid, Dijkstra field, route verification
 reservations.ts spatial claims that survive recomputation
 selection.ts    the evaluator, stance choice, arrival measurement
 engine.ts       deterministic simulation, replay capture, feedback loop
 ```
+
+### Spatial query migration (spatial-query-v2)
+
+All sightline / occlusion reads go through the unified scene query interface in
+`sceneQuery.ts`, which replaced the old "poke rectangle math directly" backend.
+The query boundary is explicit:
+
+- **layer masks** — a query names the layers it reads (`LAYER_COVER`,
+  `LAYER_SOLID`); an obstacle answers on the layers its flags allow.
+- **hit normals** — every hit carries the outward face normal; a ray starting
+  inside a solid reports the exit face (a back face) with `fromInside` set.
+- **heights** — every hit carries the obstacle's top height.
+
+The backend endpoint has **first-hit semantics**: a thin wall reports only the
+first intersection along the travel direction. The read layer reconstructs the
+occupied segment from **bidirectional queries** — a two-cast opposing-ray merge
+when both ends name the same obstacle (its full applicable scope), otherwise a
+surface walk from the far end that pairs exit faces with entry faces, repairs
+shared faces between touching solids, and flags overlapping geometry as
+inexact instead of guessing. Height is evaluated **across the whole occupied
+segment** (`min(z_enter, z_exit)`), so a descending ray that dips below a wall
+top inside the footprint is occluded — the legacy entry-only check called it
+visible.
+
+`verifyQueryEquivalence` replays a deterministic ray battery (board sweep plus
+the exact candidate×clue×stance×probe rays a selection evaluates) through both
+the legacy (`spatial-query-v1`) and migrated models and reports every
+disagreement, so a non-equivalent map is caught by data. On the shipped boards
+the selection rays show **zero lost occlusions**; the only differences are
+one-directional refinements (added descending-ray blockers, removed
+boundary-touch false positives). Failed-candidate records written by an older
+backend are **invalidated, not trusted**, at selection time and surfaced in the
+result panel / CLI. Clearance and pathing predicates are unchanged.
 
 ### 1. Candidates come from geometry, not markers
 

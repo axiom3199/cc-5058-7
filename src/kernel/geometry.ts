@@ -72,30 +72,6 @@ export function pointInRect(p: Vec2, o: Obstacle, inset = 0): boolean {
   );
 }
 
-export function segmentHitRect(a: Vec2, b: Vec2, o: Obstacle): boolean {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  let tmin = 0;
-  let tmax = 1;
-  const axes: { p: number; d: number; min: number; max: number }[] = [
-    { p: a.x, d: dx, min: o.x, max: o.x + o.w },
-    { p: a.y, d: dy, min: o.y, max: o.y + o.d },
-  ];
-  for (const ax of axes) {
-    if (Math.abs(ax.d) < EPS) {
-      if (ax.p <= ax.min || ax.p >= ax.max) return false;
-    } else {
-      let t1 = (ax.min - ax.p) / ax.d;
-      let t2 = (ax.max - ax.p) / ax.d;
-      if (t1 > t2) [t1, t2] = [t2, t1];
-      tmin = Math.max(tmin, t1);
-      tmax = Math.min(tmax, t2);
-      if (tmin >= tmax) return false;
-    }
-  }
-  return tmax > EPS && tmin < 1 - EPS;
-}
-
 /** Ray/segment parameter of the first entry into the rectangle, if any. */
 export function segmentRectEntry(a: Vec2, b: Vec2, o: Obstacle): number | null {
   const dx = b.x - a.x;
@@ -212,29 +188,6 @@ export function angleDiffDeg(a: number, b: number): number {
   let d = Math.abs(a - b) % 360;
   if (d > 180) d = 360 - d;
   return d;
-}
-
-/** True when sight line from eye at a to b is clear of all cover-relevant obstacles taller than h. */
-export function sightlineBlocked(
-  scene: SceneGeometry,
-  a: Vec2,
-  b: Vec2,
-  height: number,
-  ignoreObstacleIds: string[] = [],
-): { blocked: boolean; blockers: string[]; firstT: number | null } {
-  const blockers: string[] = [];
-  let firstT: number | null = null;
-  for (const o of scene.obstacles) {
-    if (!o.cover) continue;
-    if (ignoreObstacleIds.includes(o.id)) continue;
-    if (o.height + EPS < height) continue;
-    const t = segmentRectEntry(a, b, o);
-    if (t !== null) {
-      blockers.push(o.id);
-      if (firstT === null || t < firstT) firstT = t;
-    }
-  }
-  return { blocked: blockers.length > 0, blockers, firstT };
 }
 
 /** Is point p inside any solid obstacle for a body of radius r? */

@@ -1,17 +1,21 @@
 import type { Policy, Scenario } from '../kernel/types';
-import type { SimEvent, SimSnapshot } from '../kernel/engine';
+import type { FailedCandidateRecord, SimEvent, SimSnapshot } from '../kernel/engine';
 import { DEFAULT_POLICY } from '../kernel/selection';
+import { SPATIAL_QUERY_VERSION } from '../kernel/sceneQuery';
 
 export interface ReplayFile {
   format: 'cover-selection-replay';
-  version: 1;
+  /** 2 = failed candidates carry the spatial query backend that measured them. */
+  version: 2;
+  /** Spatial query migration this replay was written with. */
+  spatialQuery: string;
   createdAt: string;
   scenario: Scenario;
   policy: Policy;
   /** Every engine event with the snapshot that was live when it fired. */
   frames: { index: number; event: SimEvent | null; snapshot: SimSnapshot }[];
   events: SimEvent[];
-  failedCandidates: Record<string, string[]>;
+  failedCandidates: Record<string, FailedCandidateRecord[]>;
   note: string;
 }
 
@@ -20,18 +24,19 @@ export function buildReplayFile(
   policy: Policy,
   frames: { index: number; event: SimEvent | null; snapshot: SimSnapshot }[],
   events: SimEvent[],
-  failedCandidates: Record<string, string[]>,
+  failedCandidates: Record<string, FailedCandidateRecord[]>,
 ): ReplayFile {
   return {
     format: 'cover-selection-replay',
-    version: 1,
+    version: 2,
+    spatialQuery: SPATIAL_QUERY_VERSION,
     createdAt: new Date().toISOString(),
     scenario,
     policy,
     frames,
     events,
     failedCandidates,
-    note: 'Simplified fictional-game model. Replays are deterministic: replaying the same actions produces the same event stream.',
+    note: 'Simplified fictional-game model. Replays are deterministic: replaying the same actions produces the same event stream. Failed-candidate records are tagged with the spatial query backend that measured them; records from older backends are invalidated, not trusted, on import.',
   };
 }
 

@@ -25,10 +25,10 @@ import {
   pointInRect,
   rectBoundaryDistance,
   rectCorners,
-  segmentRectEntry,
   sub,
   round,
 } from './geometry';
+import { LAYER_COVER, sceneQueries } from './sceneQuery';
 
 export const STANCE_HEIGHT: Record<Stance, number> = {
   stand: STAND_STANCE_HEIGHT,
@@ -208,9 +208,12 @@ export function uncertaintySamples(clue: ThreatClue): Vec2[] {
 }
 
 /**
- * Height-aware sightline: the ray starts at the observer's eye and ends at a
- * body probe height on the target. An obstacle blocks only when the ray passes
- * into the obstacle below the obstacle's top height. This is what makes a
+ * Height-aware sightline on the unified scene query interface: the ray starts
+ * at the observer's eye and ends at a body probe height on the target. The
+ * query backend reports only the first intersection of a thin wall, so the
+ * read layer reconstructs each occupied segment along the travel direction
+ * (bidirectional casts) and an obstacle blocks when the ray passes below the
+ * obstacle's top anywhere inside its occupied segment. This is what makes a
  * 1.1 m half-wall hide a crouched observer but not a standing one, and what
  * prevents a purely 2-D "wall along the line" shortcut.
  */
@@ -222,19 +225,16 @@ export function rayVisible(
   toHeight: number,
   ignoreIds: string[] = [],
 ): { visible: boolean; blockers: string[]; firstT: number | null } {
+  const segments = sceneQueries(scene).occlusionSpans(from, to, LAYER_COVER);
   const blockers: string[] = [];
   let firstT: number | null = null;
-  for (const o of scene.obstacles) {
-    if (!o.cover) continue;
-    if (ignoreIds.includes(o.id)) continue;
-    const top = o.height;
-    if (top <= EPS) continue;
-    const t = segmentRectEntry(from, to, o);
-    if (t === null) continue;
-    const z = fromHeight + (toHeight - fromHeight) * t;
-    if (z < top - EPS) {
-      blockers.push(o.id);
-      if (firstT === null || t < firstT) firstT = t;
+  for (const s of segments.spans) {
+    if (ignoreIds.includes(s.obstacleId)) continue;
+    const zEnter = fromHeight + (toHeight - fromHeight) * s.enterT;
+    const zExit = fromHeight + (toHeight - fromHeight) * s.exitT;
+    if (Math.min(zEnter, zExit) < s.height - EPS) {
+      blockers.push(s.obstacleId);
+      if (firstT === null || s.enterT < firstT) firstT = s.enterT;
     }
   }
   return { visible: blockers.length === 0, blockers, firstT };

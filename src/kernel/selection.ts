@@ -46,6 +46,7 @@ import {
 } from './exposure';
 import { buildGrid, buildNavField, connectorClear, routeFromField, isFree, pathBodyClear, type NavGrid } from './navigation';
 import { EXCLUSION_RADIUS } from './reservations';
+import { SPATIAL_QUERY_VERSION } from './sceneQuery';
 
 export const DEFAULT_POLICY: Policy = {
   weights: { protection: 0.38, observation: 0.16, mobility: 0.2, clearance: 0.12, crowding: 0.06, watch: 0.08 },
@@ -313,6 +314,7 @@ function evaluateCandidate(
 export function selectCover(input: SelectionInput): SelectionResult {
   const { scene, agent, clues, reservations, policy } = input;
   const failed = new Set(input.failedCandidateIds ?? []);
+  const legacyFailed = (input.legacyFailedCandidateIds ?? []).filter((id) => !failed.has(id));
   const now = input.now ?? Date.now();
   const grid = gridFor(scene, agent);
   const field = buildNavField(grid, agent.pos);
@@ -418,6 +420,11 @@ export function selectCover(input: SelectionInput): SelectionResult {
   }
   const perCode = rejectionSummary.map((r) => `${r.code}×${r.count}`).join(', ');
   if (perCode) rationale.push(`Rejections by reason: ${perCode}. These are kept for audit, not collapsed into the total score.`);
+  if (legacyFailed.length) {
+    rationale.push(
+      `Invalidated ${legacyFailed.length} failed-candidate record(s) written by an older spatial query backend (${legacyFailed.join(', ')}); they are not applied as rejections and will be re-measured by arrival feedback under ${SPATIAL_QUERY_VERSION}.`,
+    );
+  }
 
   selectionCounter += 1;
   const result: SelectionResult = {
@@ -437,6 +444,8 @@ export function selectCover(input: SelectionInput): SelectionResult {
     rationale,
     reservationVersion: reservations.version,
     hiddenHostileLeak: false,
+    queryBackend: SPATIAL_QUERY_VERSION,
+    invalidatedLegacyCandidateIds: legacyFailed,
   };
   return result;
 }

@@ -119,7 +119,7 @@ export default function App() {
       scout: { ...sim.agent, pos: scoutSnap.pos, stance: scoutSnap.stance, status: scoutSnap.status, goal: scoutSnap.goal, arrival: scoutSnap.arrival, failureNote: scoutSnap.failureNote, path: scoutSnap.path },
       ally: { ...sim.ally, pos: allySnap.pos, stance: allySnap.stance, status: allySnap.status },
       selection: sel,
-      failed: frame.snapshot.failedCandidates[scenario.agent.id] ?? [],
+      failed: (frame.snapshot.failedCandidates[scenario.agent.id] ?? []).map((r) => r.id),
     };
   }, [cursor, sim, tick, selection, scenario.agent.id, scenario.ally.id]);
 
@@ -339,8 +339,15 @@ function ReasoningPanel({ selection, hoverEval }: { selection: SelectionResult |
         <>
           <p className="tiny muted">
             {selection.id} · evaluated from ({selection.originPos.x.toFixed(2)}, {selection.originPos.y.toFixed(2)}) at t={selection.createdAt.toFixed(2)}s ·
-            reservation book v{selection.reservationVersion}. Recomputes in transit re-plan from the live position and appear here as they happen.
+            reservation book v{selection.reservationVersion} · query backend {selection.queryBackend}. Recomputes in transit re-plan from the live
+            position and appear here as they happen.
           </p>
+          {selection.invalidatedLegacyCandidateIds.length > 0 && (
+            <p className="small bad-t">
+              Invalidated {selection.invalidatedLegacyCandidateIds.length} failed-candidate record(s) from an older query backend:{' '}
+              {selection.invalidatedLegacyCandidateIds.join(', ')} — they stay selectable and will be re-measured by arrival feedback.
+            </p>
+          )}
           <div className="rationale">
             {selection.rationale.map((r, i) => (
               <p key={i} className="small">

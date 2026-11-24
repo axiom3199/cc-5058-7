@@ -191,6 +191,10 @@ function reportSelection(result: ReturnType<typeof selectCover> | null): void {
     return;
   }
   console.log(`Candidates: ${result.candidates.length} total, ${result.ranked.length} valid, ${result.rejected.length} rejected`);
+  console.log(`Query backend: ${result.queryBackend}`);
+  if (result.invalidatedLegacyCandidateIds.length) {
+    console.log(`Invalidated legacy failure records: ${result.invalidatedLegacyCandidateIds.join(', ')}`);
+  }
   if (result.rejectionSummary.length) {
     console.log(`Rejections: ${result.rejectionSummary.map((r) => `${r.code}×${r.count}`).join(', ')}`);
   }

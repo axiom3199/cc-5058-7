@@ -1,7 +1,7 @@
 {
   "name": "cover-selection-sandbox",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Fictional-game cover selection kernel with an auditable graphical sandbox and replay log.",
   "scripts": {

@@ -16,6 +16,13 @@ import { DEFAULT_POLICY, measureArrival, selectCover } from './selection';
 import { buildGrid, pathBodyClear, pathLength } from './navigation';
 import { clampToBoard, dist, round } from './geometry';
 import { evaluateStance } from './exposure';
+import { LEGACY_QUERY_VERSION, SPATIAL_QUERY_VERSION } from './sceneQuery';
+
+/** A failed-candidate record tagged with the query backend that measured it. */
+export interface FailedCandidateRecord {
+  id: string;
+  backend: string;
+}
 
 export type SimEventKind =
   | 'scenario'
@@ -58,7 +65,7 @@ export interface SimSnapshot {
   agents: AgentSnapshot[];
   selections: SelectionResult[];
   reservations: Reservation[];
-  failedCandidates: Record<string, string[]>;
+  failedCandidates: Record<string, FailedCandidateRecord[]>;
   policy: Policy;
   clueVersion: number;
 }
@@ -66,6 +73,12 @@ export interface SimSnapshot {
 export interface SimOptions {
   policy?: Policy;
   allyAuto?: boolean;
+  /**
+   * Failed-candidate ids imported from a pre-migration (v1) replay. They are
+   * kept as legacy records and invalidated — with an audit note — the first
+   * time the current query backend runs a selection for that character.
+   */
+  legacyFailedCandidates?: Record<string, string[]>;
 }
 
 export interface ReplayFrame {
@@ -88,7 +101,7 @@ export class Simulation {
   reservations = new ReservationBook();
   selections: SelectionResult[] = [];
   events: SimEvent[] = [];
-  failedCandidates: Record<string, string[]> = {};
+  failedCandidates: Record<string, FailedCandidateRecord[]> = {};
   replays: { index: number; snapshot: SimSnapshot; event: SimEvent | null }[] = [];
   private seq = 0;
   private allyAuto: boolean;
@@ -105,6 +118,11 @@ export class Simulation {
       [this.scenario.ally.id]: makeRuntime(this.scenario.ally),
     };
     this.failedCandidates[this.scenario.agent.id] = [];
+    if (opts.legacyFailedCandidates) {
+      for (const [agentId, ids] of Object.entries(opts.legacyFailedCandidates)) {
+        this.failedCandidates[agentId] = ids.map((id) => ({ id, backend: LEGACY_QUERY_VERSION }));
+      }
+    }
     this.log('scenario', 'system', `Loaded "${scenario.name}"`);
     this.capture(null);
   }
@@ -156,8 +174,22 @@ export class Simulation {
     this.invalidateReplaysFrom(`stance:${agentId}`);
   }
 
+  /** Failed candidates measured under the current spatial query backend. */
   failedFor(agentId: string): string[] {
-    return (this.failedCandidates[agentId] ?? []).slice();
+    return (this.failedCandidates[agentId] ?? [])
+      .filter((r) => r.backend === SPATIAL_QUERY_VERSION)
+      .map((r) => r.id);
+  }
+
+  /** Split stored failure records into current-backend ids and legacy ids, dropping the legacy ones. */
+  private retireLegacyFailures(agentId: string): { live: string[]; stale: string[] } {
+    const records = this.failedCandidates[agentId] ?? [];
+    const live = records.filter((r) => r.backend === SPATIAL_QUERY_VERSION).map((r) => r.id);
+    const stale = records.filter((r) => r.backend !== SPATIAL_QUERY_VERSION).map((r) => r.id);
+    if (stale.length) {
+      this.failedCandidates[agentId] = records.filter((r) => r.backend === SPATIAL_QUERY_VERSION);
+    }
+    return { live, stale };
   }
 
   /** Move a clue endpoint (e.g. dragging the visible hostile) and recompute. */
@@ -240,6 +272,15 @@ export class Simulation {
   selectFor(agentId: string, opts: { quiet?: boolean } = {}): SelectionResult | null {
     const a = this.agents[agentId];
     if (!a) return null;
+    const { live, stale } = this.retireLegacyFailures(agentId);
+    if (stale.length) {
+      this.log(
+        'note',
+        agentId,
+        `${a.spec.name}: invalidated ${stale.length} failed-candidate record(s) written by ${LEGACY_QUERY_VERSION}; ${SPATIAL_QUERY_VERSION} re-measures them through arrival feedback.`,
+        { invalidated: stale },
+      );
+    }
     const result = selectCover({
       scene: {
         board: this.scenario.board,
@@ -250,7 +291,8 @@ export class Simulation {
       clues: this.clueList,
       reservations: this.reservations,
       policy: this.policy,
-      failedCandidateIds: this.failedFor(agentId),
+      failedCandidateIds: live,
+      legacyFailedCandidateIds: stale,
       otherAgents: Object.values(this.agents)
         .filter((o) => o.id !== agentId)
         .map((o) => ({ id: o.id, name: o.spec.name, pos: { ...o.pos }, radius: o.spec.radius })),
@@ -361,8 +403,13 @@ export class Simulation {
     a.failureNote = null;
     a.path = evaluation.path.map((p) => ({ ...p }));
     a.pathCursor = 0;
-    a.status = a.stance === evaluation.chosenStance ? 'moving' : 'transition';
-    a.transitionRemaining = a.stance === evaluation.chosenStance ? 0 : TRANSITION_TIME;
+    const needsTransition = a.stance !== evaluation.chosenStance;
+    if (needsTransition) {
+      a.stance = evaluation.chosenStance;
+      this.log('stance', agentId, `${a.spec.name} switches to ${evaluation.chosenStance} stance`);
+    }
+    a.status = needsTransition ? 'transition' : 'moving';
+    a.transitionRemaining = needsTransition ? TRANSITION_TIME : 0;
     this.log(
       'reservation_claim',
       agentId,
@@ -381,7 +428,9 @@ export class Simulation {
     const a = this.agents[agentId];
     if (!a?.goal) return;
     const list = this.failedCandidates[agentId] ?? [];
-    if (!list.includes(a.goal.candidateId)) list.push(a.goal.candidateId);
+    if (!list.some((r) => r.id === a.goal!.candidateId && r.backend === SPATIAL_QUERY_VERSION)) {
+      list.push({ id: a.goal.candidateId, backend: SPATIAL_QUERY_VERSION });
+    }
     this.failedCandidates[agentId] = list;
     this.log('feedback', agentId, `${a.spec.name}: candidate ${a.goal.candidateId} added to the failed list (${detail}).`);
   }
